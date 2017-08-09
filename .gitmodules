@@ -1,0 +1,3 @@
+[submodule "peda"]
+	path = peda
+	url = https://github.com/longld/peda
