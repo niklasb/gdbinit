@@ -1,6 +1,7 @@
 """trace allocations"""
 
 import gdb
+import traceback
 
 def p(x):
     # output hex/dec is apparently configurable because it differs under PEDA
@@ -13,70 +14,102 @@ def p(x):
 def is64():
     return p('sizeof(void*)') == 8
 
-class HeapFinishBreakpoint(gdb.FinishBreakpoint):
-    def __init__(self, tracer, fn_name, args):
-        super(HeapFinishBreakpoint, self).__init__(internal=True)
-        self._tracer = tracer
+# Sometimes we need *malloc, *free etc. to really break on function entry.
+# But other times this doesn't work...
+addr = {
+    'free': 'free',
+    'malloc': 'malloc',
+    'calloc': 'calloc',
+    'realloc': 'realloc'
+}
+arg_cnt = {
+    'free': 1,
+    'malloc': 1,
+    'calloc': 2,
+    'realloc': 2,
+}
+does_return = {'malloc', 'calloc', 'realloc'}
+
+def init():
+    global get_args, get_retval, get_retaddr
+    if is64():
+        get_args = [
+            lambda: p('$rdi'),
+            lambda: p('$rsi'),
+        ]
+        get_retval = lambda: p('$rax')
+        get_retaddr = lambda: p('*(unsigned long*)$rsp')
+    else:
+        get_args = [
+            lambda: p('*(unsigned long*)($esp+{})'.format(i))
+            for i in range(4, 9, 4)
+        ]
+        get_retval = lambda: p('$eax')
+        get_retaddr = lambda: p('*(unsigned long*)$esp')
+
+# track recursion level, because we only want to trace the outermost call
+in_heap_func = False
+
+class HeapFinishBreakpoint(gdb.Breakpoint):
+    def __init__(self, fn_name, retaddr):
+        super(HeapFinishBreakpoint, self).__init__('*{}'.format(retaddr), internal=True)
         self._fn_name = fn_name
-        self._args = args
-    def stop (self):
-        return_value = None
-        if self._fn_name != 'free':
-            return_value = p('$rax') if is64() else p('$eax')
-        self._tracer.trace(self._fn_name, self._args, return_value)
-        return False
-    def out_of_scope(self):
-        #gdb.write("abnormal finish {}\n".format(self._count))
-        pass
+
+    def stop(self):
+        try:
+            global in_heap_func
+            in_heap_func = False
+            if self._fn_name in does_return:
+                gdb.write(' = 0x{:x}\n'.format(get_retval()))
+            else:
+                gdb.write('\n')
+            self.enabled = False
+            return False
+        except:
+            traceback.print_exc()
+            raise
 
 class HeapBreakpoint(gdb.Breakpoint):
-    def __init__(self, tracer, fn_name):
-        super(HeapBreakpoint, self).__init__(fn_name, internal=True)
-        self._tracer = tracer
+    def __init__(self, fn_name):
+        super(HeapBreakpoint, self).__init__(addr[fn_name], internal=True)
         self._fn_name = fn_name
         self._finish_bp = None
-        if fn_name in ['malloc', 'free']:
-            self._arg_cnt = 1
-        else:
-            self._arg_cnt = 2
+        self._arg_cnt = arg_cnt[self._fn_name]
+
     def stop(self):
-        args = []
-        if self._arg_cnt > 0:
-            if is64():
-                args.append(p('$rdi'))
-            else:
-                args.append(p('*(unsigned int*)($esp+4)'))
-        if self._arg_cnt > 1:
-            if is64:
-                args.append(p('$rsi'))
-            else:
-                args.append(p('*(unsigned int*)($esp+8)'))
-        self._finish_bp = HeapFinishBreakpoint(self._tracer, self._fn_name,
-                args)
-        return False
+        try:
+            global in_heap_func
+            if in_heap_func:
+                return False
+            in_heap_func = True
+            args = [get_args[i]() for i in range(self._arg_cnt)]
 
-class HeapTracer(object):
-    def __init__(self):
-        super(HeapTracer, self).__init__()
+            gdb.write('{}({})'.format(
+                self._fn_name,
+                ', '.join('0x{:x}'.format(arg) for arg in args)))
 
-    def trace(self, fn_name, args, ret_val):
-        args = ', '.join('0x%x' % arg for arg in args)
-        if ret_val is not None:
-            gdb.write('{}({}) = 0x{:x}\n'.format(fn_name, args, ret_val))
-        else:
-            gdb.write('{}({})\n'.format(fn_name, args))
+            if self._finish_bp is not None:
+                self._finish_bp.delete()
+            self._finish_bp = HeapFinishBreakpoint(
+                    self._fn_name,
+                    retaddr=get_retaddr())
+            return False
+        except:
+            traceback.print_exc()
+            raise
 
 class HeapTracing(gdb.Command):
     def __init__(self):
         super(HeapTracing, self).__init__('heap-tracing-enable',
                 gdb.COMMAND_TRACEPOINTS)
         self._enabled = False
-        self._tracer = HeapTracer()
         self._breakpoints = []
+
     def invoke(self, argument, from_tty):
         if self._enabled:
             raise Exception('Heap tracing already enabled')
-        for fn_name in ['malloc', 'calloc', 'realloc', 'free']:
-            self._breakpoints.append(HeapBreakpoint(self._tracer, fn_name))
+        init()
+        for fn_name in addr:
+            self._breakpoints.append(HeapBreakpoint(fn_name))
 
 HeapTracing()
