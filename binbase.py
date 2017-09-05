@@ -5,7 +5,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.expanduser(os.path.dirname(__file__))))
 
 from pathname import PathName
-from mappingparser import MappingsParser
+from mappingparser import MappingsParser, get_pid
 
 class NotFoundException(Exception):
     def __init__(self, msg):
