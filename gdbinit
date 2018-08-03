@@ -30,6 +30,6 @@ set $total = $arg0
   set $i = 0
    while($i<$total)
      set $i = $i + 1
-     cont
+     continue
    end
 end
