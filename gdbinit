@@ -1,4 +1,6 @@
 set disassembly-flavor intel
+set width unlimited
+set height unlimited
 
 define hook-quit
   set confirm off
@@ -22,3 +24,12 @@ set history filename ~/.gdb_history
 set history save on
 set history size 100000
 set history remove-duplicates 10
+
+define multicont
+set $total = $arg0
+  set $i = 0
+   while($i<$total)
+     set $i = $i + 1
+     cont
+   end
+end
