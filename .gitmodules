@@ -1,3 +1,6 @@
 [submodule "peda"]
 	path = peda
 	url = https://github.com/longld/peda
+[submodule "gef"]
+	path = gef
+	url = https://github.com/hugsy/gef

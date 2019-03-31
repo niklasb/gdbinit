@@ -1,6 +1,7 @@
 set disassembly-flavor intel
 set width unlimited
 set height unlimited
+set pagination off
 
 define hook-quit
   set confirm off
@@ -11,6 +12,10 @@ source ~/gdbinit/heap.py
 
 define peda
   source ~/gdbinit/load_peda.py
+end
+
+define gef
+  source ~/gdbinit/gef/gef.py
 end
 
 define tcp
